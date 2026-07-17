@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ezeiza y Cañuelas - Uso residencial por Urbanizaciones Cerradas y Barrios Populares</title>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/simple-statistics@7.8.3/dist/simple-statistics.min.js"></script>
+
+    <style>
+        body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
+        #map { height: 100vh; width: 100vw; }
+
+        /* Estilos unificados para las leyendas del mapa */
+        .info.legend {
+            background: white;
+            padding: 12px;
+            border-radius: 8px;
+            line-height: 20px;
+            box-shadow: 0 0 15px rgba(0,0,0,0.2);
+            max-width: 260px;
+            color: #333;
+        }
+        .info.legend h4 {
+            margin: 0 0 8px;
+            font-size: 14px;
+            border-bottom: 1px solid #ccc;
+            padding-bottom: 4px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+            font-size: 12px;
+        }
+        .color-box {
+            width: 18px;
+            height: 18px;
+            margin-right: 8px;
+            opacity: 0.8;
+            border: 1px solid #fff;
+        }
+        .line-box {
+            width: 18px;
+            height: 0;
+            margin-right: 8px;
+            border-top: 3px solid #4d4d4d;
+        }
+
+        /* Etiquetas permanentes de los polígonos (solo visibles a partir de cierto zoom) */
+        .etiqueta-poligono {
+            background: rgba(255, 255, 255, 0.85);
+            border: none;
+            box-shadow: none;
+            font-size: 11px;
+            font-weight: bold;
+            padding: 1px 4px;
+            color: #333;
+        }
+        .etiqueta-poligono::before { display: none; }
+
+        .popup-fuente {
+            font-size: 11px;
+            color: #777;
+            font-style: italic;
+            margin-top: 4px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="map"></div>
+
+    <script>
+        // ==========================================
+        // 0. CONFIGURACIÓN GENERAL
+        // ==========================================
+        const ZOOM_ETIQUETAS = 13; // a partir de este zoom aparecen los nombres sobre los polígonos
+
+        // ==========================================
+        // 1. INICIALIZACIÓN DEL MAPA Y CAPA BASE
+        // ==========================================
+        const map = L.map('map').setView([-34.96, -58.61], 11);
+
+        const basemap = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OpenStreetMap &copy; CARTO'
+        }).addTo(map);
+
+        // Renderizadores SVG separados para controlar el orden de apilado (z-index)
+        const rendererDptos = L.svg({ padding: 0.5 });
+        const rendererUC = L.svg({ padding: 0.5 });
+        const rendererRenabap = L.svg({ padding: 0.5 });
+
+        const capaGroupDptos = L.layerGroup().addTo(map);
+        const capaGroupUC = L.layerGroup().addTo(map);
+        const capaGroupRenabap = L.layerGroup().addTo(map);
+
+        let geojsonDptos, geojsonUC, geojsonRenabap;
+
+        // ==========================================
+        // 2. COLORES Y ESTILOS
+        // ==========================================
+        const COLOR_UC = '#a8e000'; // verde limón
+
+        // Rampa de naranjas para clasificar Renabap por cantidad de familias
+        const RAMPA_NARANJA = ['#fef0d9', '#fdcc8a', '#fc8d59', '#d7301f'];
+
+        function getColorRenabap(v, breaks) {
+            return v <= breaks[1] ? RAMPA_NARANJA[0] :
+                   v <= breaks[2] ? RAMPA_NARANJA[1] :
+                   v <= breaks[3] ? RAMPA_NARANJA[2] :
+                                    RAMPA_NARANJA[3];
+        }
+
+        // ==========================================
+        // 3. CARGA DE LAS 3 CAPAS (PROMISE.ALL)
+        // ==========================================
+        Promise.all([
+            fetch('Eze_Canu_IGN_dpto_geo.geojson').then(res => res.json()),
+            fetch('UC_unido_arba_rpub_opisu.geojson').then(res => res.json()),
+            fetch('RENABAP_2023_POBLACIONES_eze_can.geojson').then(res => res.json())
+        ])
+        .then(([dataDptos, dataUC, dataRenabap]) => {
+
+            // --- A. DEPARTAMENTOS (línea de fondo, sin relleno) ---
+            geojsonDptos = L.geoJSON(dataDptos, {
+                renderer: rendererDptos,
+                style: function() {
+                    return {
+                        fillOpacity: 0,
+                        color: '#4d4d4d',
+                        weight: 2
+                    };
+                },
+                onEachFeature: function(feature, layer) {
+                    const nombrePartido = feature.properties.nam || 'Sin nombre';
+                    layer.bindPopup(`<b>Departamento:</b> ${nombrePartido}`);
+                    layer.bindTooltip(nombrePartido, {
+                        permanent: false,
+                        direction: 'center',
+                        className: 'etiqueta-poligono'
+                    });
+                }
+            });
+            capaGroupDptos.addLayer(geojsonDptos);
+
+            // --- B. URBANIZACIONES CERRADAS (color único) ---
+            geojsonUC = L.geoJSON(dataUC, {
+                renderer: rendererUC,
+                style: function() {
+                    return {
+                        fillColor: COLOR_UC,
+                        fillOpacity: 0.7,
+                        color: '#ffffff',
+                        weight: 1
+                    };
+                },
+                onEachFeature: function(feature, layer) {
+                    const nombreUC = feature.properties.nom_empren || 'Sin nombre';
+                    const partido = feature.properties.partido || feature.properties.nam || '';
+                    const fuente = feature.properties.sag || '';
+                    layer.bindPopup(`
+                        <b>Nombre del barrio cerrado:</b> ${nombreUC}<br>
+                        <b>Departamento:</b> ${partido}
+                        ${fuente ? `<div class="popup-fuente">Fuente: ${fuente}</div>` : ''}
+                    `);
+                    layer.bindTooltip(nombreUC, {
+                        permanent: false,
+                        direction: 'center',
+                        className: 'etiqueta-poligono'
+                    });
+
+                    layer.on({
+                        mouseover: e => { e.target.setStyle({ weight: 2, color: '#666' }); },
+                        mouseout: e => { geojsonUC.resetStyle(e.target); }
+                    });
+                }
+            });
+            capaGroupUC.addLayer(geojsonUC);
+
+            // --- C. RENABAP (clasificado por cantidad de familias) ---
+            const CAMPO_FAMILIAS = 'Cantidad de familias que viven en el barrio';
+            const valoresFamilias = dataRenabap.features.map(f => f.properties[CAMPO_FAMILIAS] || 0);
+            const clusters = ss.ckmeans(valoresFamilias, 4);
+            const breaksRenabap = [
+                Math.min(...valoresFamilias),
+                clusters[0][clusters[0].length - 1],
+                clusters[1][clusters[1].length - 1],
+                clusters[2][clusters[2].length - 1],
+                clusters[3][clusters[3].length - 1]
+            ];
+
+            geojsonRenabap = L.geoJSON(dataRenabap, {
+                renderer: rendererRenabap,
+                style: function(feature) {
+                    return {
+                        fillColor: getColorRenabap(feature.properties[CAMPO_FAMILIAS] || 0, breaksRenabap),
+                        fillOpacity: 0.7,
+                        color: '#ffffff',
+                        weight: 1
+                    };
+                },
+                onEachFeature: function(feature, layer) {
+                    const nombreBarrio = feature.properties['Nombre del barrio'] || 'Sin nombre';
+                    const partido = feature.properties['Nombre de departamentos/comuna'] || '';
+                    const familias = (feature.properties[CAMPO_FAMILIAS] || 0).toLocaleString('es-AR');
+                    layer.bindPopup(`
+                        <b>Barrio popular:</b> ${nombreBarrio}<br>
+                        <b>Departamento:</b> ${partido}<br>
+                        <b>Cantidad de familias:</b> ${familias}<br>
+                        <b>Año de relevamiento:</b> 2023
+                        <div class="popup-fuente">Recuperado de: poblaciones.org</div>
+                    `);
+                    layer.bindTooltip(nombreBarrio, {
+                        permanent: false,
+                        direction: 'center',
+                        className: 'etiqueta-poligono'
+                    });
+
+                    layer.on({
+                        mouseover: e => { e.target.setStyle({ weight: 2, color: '#666' }); },
+                        mouseout: e => { geojsonRenabap.resetStyle(e.target); }
+                    });
+                }
+            });
+            capaGroupRenabap.addLayer(geojsonRenabap);
+
+            // Orden visual: Renabap por encima de UC, ambas por encima de Departamentos
+            geojsonUC.bringToFront();
+            geojsonRenabap.bringToFront();
+
+            crearLeyenda(breaksRenabap);
+
+            // --- D. CONTROL DE CAPAS ---
+            const overlays = {
+                "Urbanizaciones cerradas": capaGroupUC,
+                "Barrios populares": capaGroupRenabap,
+                "Límite de Departamento": capaGroupDptos
+            };
+            L.control.layers({}, overlays, { collapsed: false }).addTo(map);
+
+            // Re-forzar orden si se apagan/prenden capas
+            map.on('overlayadd', function() {
+                geojsonUC.bringToFront();
+                geojsonRenabap.bringToFront();
+            });
+
+            // --- E. ETIQUETAS VISIBLES SOLO A PARTIR DE CIERTO ZOOM ---
+            function actualizarEtiquetas() {
+                const mostrar = map.getZoom() >= ZOOM_ETIQUETAS;
+                [geojsonDptos, geojsonUC, geojsonRenabap].forEach(capa => {
+                    if (!capa) return;
+                    capa.eachLayer(layer => {
+                        if (mostrar) {
+                            layer.openTooltip();
+                        } else {
+                            layer.closeTooltip();
+                        }
+                    });
+                });
+            }
+            map.on('zoomend', actualizarEtiquetas);
+            actualizarEtiquetas(); // estado inicial
+        })
+        .catch(err => console.error("Error procesando los datos geográficos:", err));
+
+        // ==========================================
+        // 4. LEYENDA
+        // ==========================================
+        function crearLeyenda(breaksRenabap) {
+            const legend = L.control({ position: 'bottomright' });
+            legend.onAdd = function () {
+                const div = L.DomUtil.create('div', 'info legend');
+                div.innerHTML = '<h4>Barrios populares</h4><span style="font-size:11px;">Cantidad de familias</span>';
+
+                for (let i = 0; i < breaksRenabap.length - 1; i++) {
+                    const desde = Math.round(breaksRenabap[i]).toLocaleString('es-AR');
+                    const hasta = Math.round(breaksRenabap[i + 1]).toLocaleString('es-AR');
+                    div.innerHTML += `
+                        <div class="legend-item">
+                            <div class="color-box" style="background:${getColorRenabap(breaksRenabap[i+1], breaksRenabap)}"></div>
+                            <span>${desde} &ndash; ${hasta} familias</span>
+                        </div>`;
+                }
+
+                div.innerHTML += `
+                    <h4 style="margin-top:10px;">Urbanizaciones Cerradas</h4>
+                    <div class="legend-item">
+                        <div class="color-box" style="background:${COLOR_UC}"></div>
+                        <span>Barrio cerrado / country</span>
+                    </div>
+                    <h4 style="margin-top:10px;">Límite departamental</h4>
+                    <div class="legend-item">
+                        <div class="line-box"></div>
+                        <span>Partido</span>
+                    </div>`;
+
+                return div;
+            };
+            legend.addTo(map);
+        }
+    </script>
+</body>
+</html>
