@@ -84,7 +84,7 @@
         // ==========================================
         const map = L.map('map').setView([-34.96, -58.61], 11);
 
-        const basemap = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+        const basemap = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
             attribution: '&copy; OpenStreetMap &copy; CARTO'
         }).addTo(map);
 
@@ -93,11 +93,10 @@
         const rendererUC = L.svg({ padding: 0.5 });
         const rendererRenabap = L.svg({ padding: 0.5 });
 
-        const capaGroupDptos = L.layerGroup().addTo(map);
         const capaGroupUC = L.layerGroup().addTo(map);
         const capaGroupRenabap = L.layerGroup().addTo(map);
 
-        let geojsonDptos, geojsonUC, geojsonRenabap;
+        let geojsonUC, geojsonRenabap;
 
         // ==========================================
         // 2. COLORES Y ESTILOS
@@ -124,27 +123,36 @@
         ])
         .then(([dataDptos, dataUC, dataRenabap]) => {
 
-            // --- A. DEPARTAMENTOS (línea de fondo, sin relleno) ---
-            geojsonDptos = L.geoJSON(dataDptos, {
-                renderer: rendererDptos,
-                style: function() {
-                    return {
-                        fillOpacity: 0,
-                        color: '#4d4d4d',
-                        weight: 2
-                    };
-                },
-                onEachFeature: function(feature, layer) {
-                    const nombrePartido = feature.properties.nam || 'Sin nombre';
-                    layer.bindPopup(`<b>Departamento:</b> ${nombrePartido}`);
-                    layer.bindTooltip(nombrePartido, {
-                        permanent: false,
-                        direction: 'center',
-                        className: 'etiqueta-poligono'
-                    });
-                }
+            // --- A. DEPARTAMENTOS (separados por partido: uno por línea de fondo) ---
+            const partidosUnicos = [...new Set(dataDptos.features.map(f => f.properties.nam || 'Sin nombre'))];
+            const overlaysDptos = {}; // se suman al control de capas al final
+            const capasDptos = [];    // referencia para el toggle de etiquetas por zoom
+
+            partidosUnicos.forEach(nombrePartido => {
+                const featuresPartido = dataDptos.features.filter(f => (f.properties.nam || 'Sin nombre') === nombrePartido);
+                const geojsonPartido = L.geoJSON({ type: 'FeatureCollection', features: featuresPartido }, {
+                    renderer: rendererDptos,
+                    style: function() {
+                        return {
+                            fillOpacity: 0,
+                            color: '#4d4d4d',
+                            weight: 2
+                        };
+                    },
+                    onEachFeature: function(feature, layer) {
+                        layer.bindPopup(`<b>Departamento:</b> ${nombrePartido}`);
+                        layer.bindTooltip(nombrePartido, {
+                            permanent: false,
+                            direction: 'center',
+                            className: 'etiqueta-poligono'
+                        });
+                    }
+                });
+                const grupoPartido = L.layerGroup().addTo(map);
+                grupoPartido.addLayer(geojsonPartido);
+                overlaysDptos[`Límite de ${nombrePartido}`] = grupoPartido;
+                capasDptos.push(geojsonPartido);
             });
-            capaGroupDptos.addLayer(geojsonDptos);
 
             // --- B. URBANIZACIONES CERRADAS (color único) ---
             geojsonUC = L.geoJSON(dataUC, {
@@ -153,8 +161,8 @@
                     return {
                         fillColor: COLOR_UC,
                         fillOpacity: 0.7,
-                        color: '#ffffff',
-                        weight: 1
+                        color: '#4d6600',
+                        weight: 1.5
                     };
                 },
                 onEachFeature: function(feature, layer) {
@@ -198,8 +206,8 @@
                     return {
                         fillColor: getColorRenabap(feature.properties[CAMPO_FAMILIAS] || 0, breaksRenabap),
                         fillOpacity: 0.7,
-                        color: '#ffffff',
-                        weight: 1
+                        color: '#7f3200',
+                        weight: 1.5
                     };
                 },
                 onEachFeature: function(feature, layer) {
@@ -237,7 +245,7 @@
             const overlays = {
                 "Urbanizaciones cerradas": capaGroupUC,
                 "Barrios populares": capaGroupRenabap,
-                "Límite de Departamento": capaGroupDptos
+                ...overlaysDptos
             };
             L.control.layers({}, overlays, { collapsed: false }).addTo(map);
 
@@ -250,7 +258,7 @@
             // --- E. ETIQUETAS VISIBLES SOLO A PARTIR DE CIERTO ZOOM ---
             function actualizarEtiquetas() {
                 const mostrar = map.getZoom() >= ZOOM_ETIQUETAS;
-                [geojsonDptos, geojsonUC, geojsonRenabap].forEach(capa => {
+                [...capasDptos, geojsonUC, geojsonRenabap].forEach(capa => {
                     if (!capa) return;
                     capa.eachLayer(layer => {
                         if (mostrar) {
@@ -280,7 +288,7 @@
                     const hasta = Math.round(breaksRenabap[i + 1]).toLocaleString('es-AR');
                     div.innerHTML += `
                         <div class="legend-item">
-                            <div class="color-box" style="background:${getColorRenabap(breaksRenabap[i+1], breaksRenabap)}"></div>
+                            <div class="color-box" style="background:${RAMPA_NARANJA[i]}"></div>
                             <span>${desde} &ndash; ${hasta} familias</span>
                         </div>`;
                 }
