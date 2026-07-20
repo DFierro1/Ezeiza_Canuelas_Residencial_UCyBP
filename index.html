@@ -67,6 +67,31 @@
             font-style: italic;
             margin-top: 4px;
         }
+
+        .info.titulo {
+            background: white;
+            padding: 8px 12px;
+            border-radius: 8px;
+            box-shadow: 0 0 15px rgba(0,0,0,0.2);
+            max-width: 240px;
+            color: #333;
+            font-size: 11px;
+            line-height: 15px;
+        }
+        .info.titulo h3 {
+            margin: 0 0 3px;
+            font-size: 13px;
+            line-height: 16px;
+        }
+        .info.titulo .autoria {
+            color: #555;
+        }
+        .info.titulo .fuentes {
+            margin-top: 5px;
+            color: #888;
+            font-size: 10px;
+            line-height: 13px;
+        }
     </style>
 </head>
 <body>
@@ -240,6 +265,7 @@
             geojsonRenabap.bringToFront();
 
             crearLeyenda(breaksRenabap);
+            crearPanelTitulo();
 
             // --- D. CONTROL DE CAPAS ---
             const overlays = {
@@ -308,6 +334,23 @@
                 return div;
             };
             legend.addTo(map);
+        }
+        // ==========================================
+        // 5. PANEL DE TÍTULO, AUTORÍA Y FUENTES
+        // ==========================================
+        function crearPanelTitulo() {
+            const panel = L.control({ position: 'topleft' });
+            panel.onAdd = function () {
+                const div = L.DomUtil.create('div', 'info titulo');
+                div.innerHTML = `
+                    <h3>Ezeiza y Cañuelas<br>Uso residencial por Urbanizaciones Cerradas y Barrios Populares</h3>
+                    <div class="autoria">Elaborado por: Daniela Florencia Fierro<br>Julio 2026</div>
+                    <div class="fuentes">
+                        Fuentes: IGN (límites departamentales); ARBA / OPISU / Registro Provincial de Urbanizaciones Cerradas (RPUC-Urbasig); poblaciones.org &ndash; Registro Nacional de Barrios Populares (RENABAP 2023)
+                    </div>`;
+                return div;
+            };
+            panel.addTo(map);
         }
     </script>
 </body>
